@@ -1,0 +1,16 @@
+[package]
+name = "cbor-mediawiki-dump"
+version = "0.1.0"
+authors = ["Erutuon <5840197+Erutuon@users.noreply.github.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["lib"]
+
+[dependencies]
+anyhow = "*"
+chrono = { version = "0.4.19", default-features = false, features = ["serde"] }
+dump_parser = { path = "../enwikt-dump-rs/dump_parser" }
+quick-xml = { version = "0.20.0", features = ["serialize"] }
+serde = { version = "1.0.116", features = ["derive"] }
+serde_cbor = "0.11.1"
