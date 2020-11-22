@@ -1,11 +1,9 @@
-use std::{borrow::Cow, fs::File, io::BufReader, net::IpAddr, path::Path};
+use std::{borrow::Cow, io::BufRead, net::IpAddr};
 
 use chrono::{DateTime, Utc};
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::{Reader, events::{BytesStart, Event}};
 use serde::Serialize;
 use thiserror::Error;
-
-type Reader = quick_xml::Reader<BufReader<File>>;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -18,7 +16,7 @@ pub enum Error {
 }
 
 impl Error {
-    fn format(reader: &Reader) -> Self {
+    fn format<R: BufRead>(reader: &Reader<R>) -> Self {
         Self::Format {
             position: reader.buffer_position(),
         }
@@ -64,8 +62,8 @@ pub enum Contributor {
     User { username: String, id: u32 },
 }
 
-pub fn get_start_tag<'a>(
-    reader: &mut Reader,
+pub fn get_start_tag<'a, R: BufRead>(
+    reader: &mut Reader<R>,
     buf: &'a mut Vec<u8>,
 ) -> Result<(BytesStart<'a>, bool), Error> {
     match reader.read_event(buf) {
@@ -75,7 +73,7 @@ pub fn get_start_tag<'a>(
     }
 }
 
-pub fn expect_tag_start(tag: &str, reader: &mut Reader, buf: &mut Vec<u8>) -> Result<(), Error> {
+pub fn expect_tag_start<R: BufRead>(tag: &str, reader: &mut Reader<R>, buf: &mut Vec<u8>) -> Result<(), Error> {
     let start = reader.read_event(buf).map_err(|_| Error::format(reader))?;
     // dbg!(&start);
     if matches!(start, Event::Start(start) if start.name() == tag.as_bytes()) {
@@ -85,7 +83,7 @@ pub fn expect_tag_start(tag: &str, reader: &mut Reader, buf: &mut Vec<u8>) -> Re
     }
 }
 
-pub fn expect_tag_end(tag: &str, reader: &mut Reader, buf: &mut Vec<u8>) -> Result<(), Error> {
+pub fn expect_tag_end<R: BufRead>(tag: &str, reader: &mut Reader<R>, buf: &mut Vec<u8>) -> Result<(), Error> {
     let end = reader.read_event(buf).map_err(|_| Error::format(reader))?;
     // dbg!(&end);
     if matches!(end, Event::End(end) if end.name() == tag.as_bytes()) {
@@ -95,7 +93,7 @@ pub fn expect_tag_end(tag: &str, reader: &mut Reader, buf: &mut Vec<u8>) -> Resu
     }
 }
 
-pub fn skip_text(reader: &mut Reader, buf: &mut Vec<u8>) -> Result<(), Error> {
+pub fn skip_text<R: BufRead>(reader: &mut Reader<R>, buf: &mut Vec<u8>) -> Result<(), Error> {
     let text = reader.read_event(buf).map_err(|_| Error::format(reader))?;
     // dbg!(&text);
     if matches!(text, Event::Text(_)) {
@@ -105,8 +103,8 @@ pub fn skip_text(reader: &mut Reader, buf: &mut Vec<u8>) -> Result<(), Error> {
     }
 }
 
-pub fn map_unescaped_text<F: FnMut(Cow<'_, [u8]>) -> Result<T, Error>, T>(
-    reader: &mut Reader,
+pub fn map_unescaped_text<R: BufRead, F: FnMut(Cow<'_, [u8]>) -> Result<T, Error>, T>(
+    reader: &mut Reader<R>,
     buf: &mut Vec<u8>,
     tag: &str,
     mut f: F,
@@ -129,10 +127,10 @@ pub fn map_unescaped_text<F: FnMut(Cow<'_, [u8]>) -> Result<T, Error>, T>(
     }
 }
 
-pub fn parse(path: &Path) -> Result<(), Error> {
+pub fn parse<R: BufRead>(reader: R) -> Result<(), Error> {
     // Bigger than maximum revision length (2 MiB).
     let mut buf = Vec::with_capacity(3 * 1024 * 1024);
-    let mut reader = Reader::from_file(path).map_err(|e| Error::File(e))?;
+    let mut reader = Reader::from_reader(reader);
 
     skip_text(&mut reader, &mut buf)?;
     expect_tag_start("mediawiki", &mut reader, &mut buf)?;

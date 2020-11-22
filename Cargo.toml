@@ -8,8 +8,11 @@ edition = "2018"
 crate-type = ["lib"]
 
 [dependencies]
-anyhow = "*"
+anyhow = "*" # only for bin
+bzip2 = "0.4.1"
 chrono = { version = "0.4.19", default-features = false, features = ["serde"] }
+rust-lzma = "0.5"
+pico-args = "0.3.4" # only for bin
 quick-xml = { version = "0.20.0", features = ["serialize"] }
 serde = { version = "1.0.116", features = ["derive"] }
 serde_cbor = "0.11.1"
