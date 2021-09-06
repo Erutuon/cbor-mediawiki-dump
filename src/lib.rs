@@ -15,7 +15,7 @@ use quick_xml::{
     events::{BytesStart, Event},
     Reader,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -56,7 +56,7 @@ impl<E: std::error::Error> Error<E> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Page {
     pub title: String,
     pub namespace: i32,
@@ -66,7 +66,7 @@ pub struct Page {
     pub revisions: Vec<Revision>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Revision {
     pub id: u32,
     pub parent_id: Option<u32>,
@@ -80,19 +80,38 @@ pub struct Revision {
     pub sha1: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Comment {
     DeletedOrAbsent(bool),
     Visible(String),
 }
 
-#[derive(Serialize)]
-#[serde(untagged)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+// #[serde(untagged)]
 pub enum Contributor {
     Deleted,
     Ip { ip: IpAddr },
     User { username: String, id: u32 },
+}
+
+#[test]
+fn test_contributor_deserialize() {
+    #[track_caller]
+    fn assert_round_trip<T: Serialize + serde::de::DeserializeOwned + std::fmt::Debug + Eq>(
+        val: T,
+    ) {
+        let cbor = serde_cbor::to_vec(&val).unwrap();
+        assert_eq!(serde_cbor::from_slice::<T>(&cbor).unwrap(), val);
+    }
+    assert_round_trip(Contributor::Deleted);
+    assert_round_trip(Contributor::User {
+        username: "Wonderfool".into(),
+        id: 1,
+    });
+    assert_round_trip(Contributor::Ip {
+        ip: std::net::IpAddr::from([127, 0, 0, 1]),
+    });
 }
 
 pub fn get_start_tag<'a, R: BufRead, E: std::error::Error>(
