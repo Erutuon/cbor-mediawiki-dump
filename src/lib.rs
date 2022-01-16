@@ -26,8 +26,6 @@ pub enum Error<E: std::error::Error = Infallible> {
     FailedToDecode { position: usize },
     #[error("failed to open XML file: {0}")]
     File(quick_xml::Error),
-    #[error("Done deserializing")]
-    ShortCircuit,
     #[error("Failed to {action} at {}", path.display())]
     Io {
         action: &'static str,
@@ -38,6 +36,13 @@ pub enum Error<E: std::error::Error = Infallible> {
     Lzma { source: LzmaError, path: PathBuf },
     #[error("Unexpected tag: {}", String::from_utf8_lossy(.0))]
     UnexpectedTag(Vec<u8>),
+    /// Return `Err(Error::ShortCircuit)` from the `page_processor` callback of [`parse`] or [`parse_from_file`]
+    /// to stop parsing pages early even though there was no error.
+    #[error("Done deserializing")]
+    ShortCircuit,
+    /// This error variant allows the `page_processor` callback of [`parse`] or [`parse_from_file`].
+    /// to indicate that there was an error in parsing. Set it to `std::convert::Infallible`
+    /// if your callback cannot fail.
     #[error("{0}")]
     Other(E),
 }
