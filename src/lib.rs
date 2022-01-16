@@ -7,8 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(feature = "bz2")]
 use bzip2::read::BzDecoder;
 use chrono::{DateTime, Utc};
+#[cfg(feature = "lzma")]
 use lzma::{LzmaError, LzmaReader};
 use memchr::memmem;
 use quick_xml::{events::Event, Reader};
@@ -33,6 +35,7 @@ pub enum Error<E: std::error::Error = Infallible> {
         path: PathBuf,
     },
     #[error("Failed to decode LZMA at {}", path.display())]
+    #[cfg(feature = "lzma")]
     Lzma { source: LzmaError, path: PathBuf },
     #[error("Unexpected tag: {}", String::from_utf8_lossy(.0))]
     UnexpectedTag(Vec<u8>),
@@ -81,6 +84,7 @@ impl<E: std::error::Error> Error<E> {
                 source,
                 path,
             },
+            #[cfg(feature = "lzma")]
             Error::Lzma { source, path } => Error::Lzma { source, path },
             Error::UnexpectedTag(e) => Error::UnexpectedTag(e),
             Error::Other(_) => unreachable!(),
@@ -638,11 +642,13 @@ pub fn parse_from_file<
     let file = File::open(path).map_err(|e| Error::from_io("open", e, path))?;
 
     match path.extension().and_then(|s| s.to_str()) {
+        #[cfg(feature = "bz2")]
         Some("bz2") => parse(
             BufReader::new(BzDecoder::new(file)),
             page_processor,
             skip_header,
         ),
+        #[cfg(feature = "lzma")]
         Some("7z") => parse(
             BufReader::new(
                 LzmaReader::new_decompressor(file).map_err(|source| Error::Lzma {
