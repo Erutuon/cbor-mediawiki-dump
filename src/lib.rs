@@ -90,6 +90,28 @@ impl<E: std::error::Error> Error<E> {
             Error::Other(_) => unreachable!(),
         }
     }
+
+    pub fn to_infallible(e: Error<E>) -> Result<Error<Infallible>, E> {
+        Ok(match e {
+            Error::Format { position } => Error::Format { position },
+            Error::FailedToDecode { position } => Error::FailedToDecode { position },
+            Error::File(e) => Error::File(e),
+            Error::ShortCircuit => Error::ShortCircuit,
+            Error::Io {
+                action,
+                source,
+                path,
+            } => Error::Io {
+                action,
+                source,
+                path,
+            },
+            #[cfg(feature = "lzma")]
+            Error::Lzma { source, path } => Error::Lzma { source, path },
+            Error::UnexpectedTag(e) => Error::UnexpectedTag(e),
+            Error::Other(other) => return Err(other),
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize)]
