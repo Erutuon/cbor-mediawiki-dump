@@ -21,13 +21,13 @@ mod tag;
 use tag::Tag;
 
 #[derive(Error, Debug)]
-pub enum Error<E: std::error::Error = Infallible> {
+pub enum Error<E: std::error::Error + 'static = Infallible> {
     #[error("invalid XML (schema or format) at position {position}")]
     Format { position: usize },
     #[error("failed to unescape or decode UTF-8 at position {position}")]
     FailedToDecode { position: usize },
     #[error("failed to open XML file: {0}")]
-    File(quick_xml::Error),
+    File(#[source] quick_xml::Error),
     #[error("Failed to {action} at {}", path.display())]
     Io {
         action: &'static str,
@@ -46,8 +46,8 @@ pub enum Error<E: std::error::Error = Infallible> {
     /// This error variant allows the `page_processor` callback of [`parse`] or [`parse_from_file`].
     /// to indicate that there was an error in parsing. Set it to `std::convert::Infallible`
     /// if your callback cannot fail.
-    #[error("{0}")]
-    Other(E),
+    #[error("Error in page processor")]
+    Other(#[source] E),
 }
 
 impl<E: std::error::Error> Error<E> {
