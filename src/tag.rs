@@ -156,7 +156,7 @@ impl FromStr for Tag {
             "type" => Type,
             "upload" => Upload,
             "username" => Username,
-            _ => return Err(Error::UnexpectedTag(s.as_bytes().to_vec())),
+            _ => return Err(Error::UnexpectedTag(s.as_bytes().into())),
         };
         Ok(tag)
     }
@@ -167,7 +167,7 @@ impl TryFrom<&[u8]> for Tag {
 
     fn try_from(s: &[u8]) -> Result<Self, Self::Error> {
         std::str::from_utf8(s)
-            .map_err(|_| Error::UnexpectedTag(s.to_vec()))?
+            .map_err(|_| Error::UnexpectedTag(s.into()))?
             .parse()
     }
 }

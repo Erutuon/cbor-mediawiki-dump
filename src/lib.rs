@@ -36,9 +36,9 @@ pub enum Error<E: std::error::Error + 'static = Infallible> {
     },
     #[error("Failed to decode LZMA at {}", path.display())]
     #[cfg(feature = "lzma")]
-    Lzma { source: LzmaError, path: PathBuf },
+    Lzma { source: LzmaError, path: Box<Path> },
     #[error("Unexpected tag: {}", String::from_utf8_lossy(.0))]
-    UnexpectedTag(Vec<u8>),
+    UnexpectedTag(Box<[u8]>),
     /// Return `Err(Error::ShortCircuit)` from the `page_processor` callback of [`parse`] or [`parse_from_file`]
     /// to stop parsing pages early even though there was no error.
     #[error("Done deserializing")]
