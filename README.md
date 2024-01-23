@@ -1,6 +1,8 @@
 # cbor-mediawiki-dump
-Converts XML dumps of MediaWiki pages to a [CBOR](https://cbor.io/) sequence of page objects
-containing the same page information.
+The library crate provides functions (`parse_from_file` and `parse`) that parse the XML dumps of Wikimedia pages (for instance, `pages-articles.xml.bz2`).
+The binary crate converts the page information into formats that are easier to parse than XML:
+[CBOR](https://cbor.io/) sequence, [JSONL](https://jsonlines.org/), [Bincode](https://docs.rs/bincode/),
+[MessagePack](https://msgpack.org/).
 
 # Usage
 Download an XML dump, such as `pages-articles.xml.bz2` or `pages-meta-current.xml.bz2`, for the Wikimedia project
