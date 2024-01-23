@@ -1,5 +1,7 @@
 use std::{convert::TryFrom, str::FromStr};
 
+use quick_xml::name::QName;
+
 use crate::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,7 +54,7 @@ pub(crate) enum Tag {
 }
 
 impl Tag {
-    pub(crate) fn as_bytes(&self) -> &[u8] {
+    pub(crate) fn as_q_name(&self) -> QName {
         use Tag::*;
         let tag = match self {
             Action => "action",
@@ -101,7 +103,7 @@ impl Tag {
             Upload => "upload",
             Username => "username",
         };
-        tag.as_bytes()
+        QName(tag.as_bytes())
     }
 }
 
@@ -169,5 +171,13 @@ impl TryFrom<&[u8]> for Tag {
         std::str::from_utf8(s)
             .map_err(|_| Error::UnexpectedTag(s.into()))?
             .parse()
+    }
+}
+
+impl TryFrom<QName<'_>> for Tag {
+    type Error = Error;
+
+    fn try_from(s: QName<'_>) -> Result<Self, Self::Error> {
+        TryFrom::try_from(s.as_ref())
     }
 }
