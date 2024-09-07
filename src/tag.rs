@@ -5,7 +5,7 @@ use quick_xml::name::QName;
 use crate::Error;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Tag {
+pub enum Tag {
     Action,
     Base,
     Case,
@@ -26,6 +26,7 @@ pub(crate) enum Tag {
     Namespace,
     Namespaces,
     Ns,
+    Origin,
     Page,
     Params,
     ParentId,
@@ -54,9 +55,9 @@ pub(crate) enum Tag {
 }
 
 impl Tag {
-    pub(crate) fn as_q_name(&self) -> QName {
+    pub(crate) fn as_str(&self) -> &str {
         use Tag::*;
-        let tag = match self {
+        match self {
             Action => "action",
             Base => "base",
             Case => "case",
@@ -77,6 +78,7 @@ impl Tag {
             Namespace => "namespace",
             Namespaces => "namespaces",
             Ns => "ns",
+            Origin => "origin",
             Page => "page",
             Params => "params",
             ParentId => "parentid",
@@ -102,8 +104,11 @@ impl Tag {
             Type => "type",
             Upload => "upload",
             Username => "username",
-        };
-        QName(tag.as_bytes())
+        }
+    }
+
+    pub(crate) fn as_q_name(&self) -> QName {
+        QName(self.as_str().as_bytes())
     }
 }
 
@@ -112,7 +117,7 @@ impl FromStr for Tag {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Tag::*;
-        let tag = match s {
+        let tag = match s.trim_end_matches(|c| char::is_ascii_whitespace(&c)) {
             "action" => Action,
             "base" => Base,
             "case" => Case,
@@ -136,6 +141,7 @@ impl FromStr for Tag {
             "page" => Page,
             "params" => Params,
             "parentid" => ParentId,
+            "origin" => Origin,
             "redirect" => Redirect,
             "restrictions" => Restrictions,
             "revision" => Revision,

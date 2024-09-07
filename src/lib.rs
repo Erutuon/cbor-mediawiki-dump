@@ -25,6 +25,16 @@ use tag::Tag;
 pub enum Error<E: std::error::Error + 'static = Infallible> {
     #[error("invalid XML (schema or format) at position {position}")]
     Format { position: usize },
+    #[error(
+        "expected tag {}, got tag {} at position {position}",
+        expected.as_str(),
+        actual.as_str(),
+    )]
+    Tag {
+        expected: Tag,
+        actual: Tag,
+        position: usize,
+    },
     #[error("failed to unescape or decode UTF-8 at position {position}")]
     FailedToDecode { position: usize },
     #[error("failed to open XML file: {0}")]
@@ -58,6 +68,14 @@ impl<E: std::error::Error> Error<E> {
         }
     }
 
+    fn tag<R: BufRead>(reader: &Reader<R>, expected: Tag, actual: Tag) -> Self {
+        Self::Tag {
+            expected,
+            actual,
+            position: reader.buffer_position(),
+        }
+    }
+
     fn from_io<P: Into<PathBuf>>(action: &'static str, source: std::io::Error, path: P) -> Self {
         Error::Io {
             action,
@@ -73,6 +91,15 @@ impl<E: std::error::Error> Error<E> {
     fn from_infallible(e: Error<Infallible>) -> Error<E> {
         match e {
             Error::Format { position } => Error::Format { position },
+            Error::Tag {
+                expected,
+                actual: tag,
+                position,
+            } => Error::Tag {
+                expected,
+                actual: tag,
+                position,
+            },
             Error::FailedToDecode { position } => Error::FailedToDecode { position },
             Error::File(e) => Error::File(e),
             Error::ShortCircuit => Error::ShortCircuit,
@@ -95,6 +122,15 @@ impl<E: std::error::Error> Error<E> {
     pub fn to_infallible(e: Error<E>) -> Result<Error<Infallible>, E> {
         Ok(match e {
             Error::Format { position } => Error::Format { position },
+            Error::Tag {
+                expected,
+                actual: tag,
+                position,
+            } => Error::Tag {
+                expected,
+                actual: tag,
+                position,
+            },
             Error::FailedToDecode { position } => Error::FailedToDecode { position },
             Error::File(e) => Error::File(e),
             Error::ShortCircuit => Error::ShortCircuit,
@@ -131,6 +167,7 @@ pub struct Revision {
     pub parent_id: Option<u32>,
     pub timestamp: DateTime<Utc>,
     pub contributor: Contributor,
+    pub origin: u32,
     pub minor: bool,
     pub comment: Comment,
     pub model: String,  // Could be converted to integer using hashmap.
@@ -221,34 +258,48 @@ fn get_start_tag_and_attribute<R: BufRead, E: std::error::Error>(
 }
 
 fn expect_tag_start<R: BufRead, E: std::error::Error>(
-    reader: &mut Reader<R>,
-    buf: &mut Vec<u8>,
-    tag: Tag,
+    reader: &Reader<R>,
+    event: &Event,
+    expected_tag: Tag,
 ) -> Result<(), Error<E>> {
-    let start = reader
-        .read_event_into(buf)
-        .map_err(|_| Error::format(reader))?;
-    if matches!(start, Event::Start(start) if Tag::try_from(start.name()).map_err(Error::from_infallible)? == tag)
-    {
+    let (Event::Start(start) | Event::Empty(start)) = event else {
+        return Err(Error::format(reader));
+    };
+    let tag = Tag::try_from(start.name()).map_err(Error::from_infallible)?;
+    if tag == expected_tag {
         Ok(())
     } else {
-        Err(Error::format(reader))
+        Err(Error::tag(reader, expected_tag, tag))
     }
+}
+
+fn expect_tag_start_from_reader<'a, 'b, R: BufRead, E: std::error::Error>(
+    reader: &'a mut Reader<R>,
+    buf: &'b mut Vec<u8>,
+    expected_tag: Tag,
+) -> Result<Event<'b>, Error<E>> {
+    let event = reader
+        .read_event_into(buf)
+        .map_err(|_| Error::format(reader))?;
+    expect_tag_start(&reader, &event, expected_tag).map(|_| event)
 }
 
 fn expect_tag_end<R: BufRead, E: std::error::Error>(
     reader: &mut Reader<R>,
     buf: &mut Vec<u8>,
-    tag: Tag,
+    expected_tag: Tag,
 ) -> Result<(), Error<E>> {
-    let end = reader
+    let Event::End(end) = reader
         .read_event_into(buf)
-        .map_err(|_| Error::format(reader))?;
-    if matches!(end, Event::End(end) if Tag::try_from(end.name()).map_err(Error::from_infallible)? == tag)
-    {
+        .map_err(|_| Error::format(reader))?
+    else {
+        return Err(Error::format(reader));
+    };
+    let tag = Tag::try_from(end.name()).map_err(Error::from_infallible)?;
+    if tag == expected_tag {
         Ok(())
     } else {
-        Err(Error::format(reader))
+        Err(Error::tag(reader, tag, expected_tag))
     }
 }
 
@@ -274,7 +325,7 @@ fn map_unescaped_text<
 >(
     reader: &mut Reader<R>,
     buf: &mut Vec<u8>,
-    tag: Tag,
+    expected_tag: Tag,
     mut f: F,
 ) -> Result<T, Error<E>> {
     match reader
@@ -286,11 +337,17 @@ fn map_unescaped_text<
                 position: reader.buffer_position(),
             })?;
             let res = f(text);
-            if matches!(reader.read_event_into(buf), Ok(Event::End(end)) if Tag::try_from(end.name()).map_err(Error::from_infallible)? == tag)
-            {
+            let Event::End(end) = reader
+                .read_event_into(buf)
+                .map_err(|_| Error::format(reader))?
+            else {
+                return Err(Error::format(reader));
+            };
+            let tag = Tag::try_from(end.name()).map_err(Error::from_infallible)?;
+            if tag == expected_tag {
                 res
             } else {
-                Err(Error::format(reader))
+                Err(Error::tag(reader, expected_tag, tag))
             }
         }
         _ => Err(Error::format(reader)),
@@ -380,9 +437,9 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
     // skip_text(&mut reader, &mut buf)?;
     // Skip over initial mediawiki tag.
     if skip_header {
-        expect_tag_start(&mut reader, &mut buf, Tag::MediaWiki)?;
+        expect_tag_start_from_reader(&mut reader, &mut buf, Tag::MediaWiki)?;
         skip_text(&mut reader, &mut buf)?;
-        expect_tag_start(&mut reader, &mut buf, Tag::SiteInfo)?;
+        expect_tag_start_from_reader(&mut reader, &mut buf, Tag::SiteInfo)?;
         reader
             .read_to_end_into(QName(b"siteinfo"), &mut buf)
             .map_err(|_| Error::format(&reader))?;
@@ -404,15 +461,15 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
         }
         skip_text(&mut reader, &mut buf)?;
 
-        expect_tag_start(&mut reader, &mut buf, Tag::Title)?;
+        expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Title)?;
         let title = read_text(&mut reader, &mut buf, Tag::Title)?;
         skip_text(&mut reader, &mut buf)?;
 
-        expect_tag_start(&mut reader, &mut buf, Tag::Ns)?;
+        expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Ns)?;
         let namespace: i32 = parse_text(&mut reader, &mut buf, Tag::Ns)?;
         skip_text(&mut reader, &mut buf)?;
 
-        expect_tag_start(&mut reader, &mut buf, Tag::Id)?;
+        expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Id)?;
         let id: u32 = parse_text(&mut reader, &mut buf, Tag::Id)?;
         skip_text(&mut reader, &mut buf)?;
 
@@ -466,7 +523,7 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                 read_revision_start = true;
             }
 
-            expect_tag_start(&mut reader, &mut buf, Tag::Id)?;
+            expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Id)?;
             let id: u32 = parse_text(&mut reader, &mut buf, Tag::Id)?;
             skip_text(&mut reader, &mut buf)?;
 
@@ -510,7 +567,7 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                         let username = read_text(&mut reader, &mut buf, Tag::Username)?;
                         skip_text(&mut reader, &mut buf)?;
 
-                        expect_tag_start(&mut reader, &mut buf, Tag::Id)?;
+                        expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Id)?;
                         let id: u32 = parse_text(&mut reader, &mut buf, Tag::Id)?;
                         skip_text(&mut reader, &mut buf)?;
                         Contributor::User { username, id }
@@ -528,6 +585,7 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                 }
             };
             skip_text(&mut reader, &mut buf)?;
+            dbg!();
 
             let event = reader
                 .read_event_into(&mut buf)
@@ -548,6 +606,14 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                 (event, false)
             };
 
+            expect_tag_start(&reader, &event, Tag::Origin)?;
+            dbg!();
+            let origin: u32 = parse_text(&mut reader, &mut buf, Tag::Origin)?;
+            dbg!();
+            skip_text(&mut reader, &mut buf)?;
+            dbg!(origin);
+
+            let event = expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Comment)?;
             let (event, comment) = if let Event::Start(start) = &event {
                 if start.name() == QName(b"comment") {
                     let comment = parse_text(&mut reader, &mut buf, Tag::Comment)?;
@@ -574,6 +640,7 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                                 Comment::DeletedOrAbsent(true),
                             )
                         } else {
+                            dbg!(&event);
                             return Err(Error::format(&reader));
                         }
                     } else {
@@ -586,17 +653,11 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                 return Err(Error::format(&reader));
             };
 
-            if let Event::Start(start) = event {
-                if start.name() != QName(b"model") {
-                    return Err(Error::format(&reader));
-                }
-            } else {
-                return Err(Error::format(&reader));
-            }
+            expect_tag_start(&reader, &event, Tag::Model)?;
             let model = parse_text(&mut reader, &mut buf, Tag::Model)?;
             skip_text(&mut reader, &mut buf)?;
 
-            expect_tag_start(&mut reader, &mut buf, Tag::Format)?;
+            expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Format)?;
             let format = parse_text(&mut reader, &mut buf, Tag::Format)?;
             skip_text(&mut reader, &mut buf)?;
 
@@ -611,7 +672,7 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
             };
             skip_text(&mut reader, &mut buf)?;
 
-            expect_tag_start(&mut reader, &mut buf, Tag::Sha1)?;
+            expect_tag_start_from_reader(&mut reader, &mut buf, Tag::Sha1)?;
             let sha1 = parse_text(&mut reader, &mut buf, Tag::Sha1)?;
             skip_text(&mut reader, &mut buf)?;
 
@@ -623,6 +684,7 @@ pub fn parse<R: BufRead, F: FnMut(Page) -> Result<(), Error<E>>, E: std::error::
                 parent_id,
                 timestamp,
                 contributor,
+                origin,
                 minor,
                 comment,
                 model,
